@@ -37,8 +37,6 @@ limitations under the License.
 #include <fstream>
 #include <utility>
 #include <vector>
-#include <jpeglib.h>
-#include <setjmp.h>
 
 #include "tensorflow/cc/ops/const_op.h"
 #include "tensorflow/cc/ops/image_ops.h"
@@ -62,8 +60,6 @@ limitations under the License.
 
 #include "cv_process.hpp" 
 
-cv::Mat img;
-
 // These are all common classes it's handy to reference with no namespace.
 using tensorflow::Flag;
 using tensorflow::Tensor;
@@ -76,11 +72,11 @@ using namespace tensorflow;
 // returns a vector of the strings. It pads with empty strings so the length
 // of the result is a multiple of 16, because our model expects that.
 Status ReadLabelsFile(const string& file_name, std::vector<string>* result,
-        size_t* found_label_count) {
+    size_t* found_label_count) {
     std::ifstream file(file_name);
     if (!file) {
         return tensorflow::errors::NotFound("Labels file ", file_name,
-                " not found.");
+            " not found.");
     }
     result->clear();
     string line;
@@ -96,14 +92,14 @@ Status ReadLabelsFile(const string& file_name, std::vector<string>* result,
 }
 
 Status ReadTensorFromImageFile3(const string& file_name, const int input_height,
-        const int input_width, const float input_mean,
-        const float input_std,
-        std::vector<Tensor>* out_tensors) {
+    const int input_width, const float input_mean,
+    const float input_std,
+    std::vector<Tensor>* out_tensors) {
     const int wanted_channels = 3;
 
     tensorflow::Tensor image_tensor(
-            tensorflow::DT_FLOAT, tensorflow::TensorShape(
-                {1, input_height, input_width, wanted_channels}));
+        tensorflow::DT_FLOAT, tensorflow::TensorShape(
+    { 1, input_height, input_width, wanted_channels }));
     auto image_tensor_mapped = image_tensor.tensor<float, 4>();
     float *out = image_tensor_mapped.data();
     std::ifstream file(file_name, std::ios::in | std::ios::binary | std::ios::ate);
@@ -120,14 +116,12 @@ Status ReadTensorFromImageFile3(const string& file_name, const int input_height,
     return Status::OK();
 }
 
-
-
 // Given an image file name, read in the data, try to decode it as an image,
 // resize it to the requested size, and then scale the values as desired.
 Status ReadTensorFromImageFile1(const string& file_name, const int input_height,
-        const int input_width, const float input_mean,
-        const float input_std,
-        std::vector<Tensor>* out_tensors) {
+    const int input_width, const float input_mean,
+    const float input_std,
+    std::vector<Tensor>* out_tensors) {
     auto root = tensorflow::Scope::NewRootScope();
     using namespace ::tensorflow::ops;  // NOLINT(build/namespaces)
 
@@ -140,16 +134,18 @@ Status ReadTensorFromImageFile1(const string& file_name, const int input_height,
     tensorflow::Output image_reader;
     if (tensorflow::StringPiece(file_name).ends_with(".png")) {
         image_reader = DecodePng(root.WithOpName("png_reader"), file_reader,
-                DecodePng::Channels(wanted_channels));
-    } else if (tensorflow::StringPiece(file_name).ends_with(".gif")) {
+            DecodePng::Channels(wanted_channels));
+    }
+    else if (tensorflow::StringPiece(file_name).ends_with(".gif")) {
         // gif decoder returns 4-D tensor, remove the first dim
         image_reader = Squeeze(root.WithOpName("squeeze_first_dim"),
-                DecodeGif(root.WithOpName("gif_reader"),
-                    file_reader));
-    } else {
+            DecodeGif(root.WithOpName("gif_reader"),
+                file_reader));
+    }
+    else {
         // Assume if it's neither a PNG nor a GIF then it must be a JPEG.
         image_reader = DecodeJpeg(root.WithOpName("jpeg_reader"), file_reader,
-                DecodeJpeg::Channels(wanted_channels));
+            DecodeJpeg::Channels(wanted_channels));
     }
     // Now cast the image data to float so we can do normal math on it.
     auto float_caster =
@@ -161,66 +157,66 @@ Status ReadTensorFromImageFile1(const string& file_name, const int input_height,
     auto dims_expander = ExpandDims(root, float_caster, 0);
     // Bilinearly resize the image to fit the required dimensions.
     auto resized = ResizeBilinear(
-            root, dims_expander,
-            Const(root.WithOpName("size"), {input_height, input_width}));
+        root, dims_expander,
+        Const(root.WithOpName("size"), { input_height, input_width }));
     // Subtract the mean and divide by the scale.
-    Div(root.WithOpName(output_name), Sub(root, resized, {input_mean}),
-            //Div(root.WithOpName(output_name), Sub(root, resized, {103.939, 116.779, 123.68}),
-        {input_std});
+    Div(root.WithOpName(output_name), Sub(root, resized, { input_mean }),
+        //Div(root.WithOpName(output_name), Sub(root, resized, {103.939, 116.779, 123.68}),
+    { input_std });
 
-            // This runs the GraphDef network definition that we've just constructed, and
-            // returns the results in the output tensor.
-            tensorflow::GraphDef graph;
-            TF_RETURN_IF_ERROR(root.ToGraphDef(&graph));
+    // This runs the GraphDef network definition that we've just constructed, and
+    // returns the results in the output tensor.
+    tensorflow::GraphDef graph;
+    TF_RETURN_IF_ERROR(root.ToGraphDef(&graph));
 
-            std::unique_ptr<tensorflow::Session> session(
-                tensorflow::NewSession(tensorflow::SessionOptions()));
-            TF_RETURN_IF_ERROR(session->Create(graph));
-            TF_RETURN_IF_ERROR(session->Run({}, {output_name}, {}, out_tensors));
-            return Status::OK();
-            }
+    std::unique_ptr<tensorflow::Session> session(
+        tensorflow::NewSession(tensorflow::SessionOptions()));
+    TF_RETURN_IF_ERROR(session->Create(graph));
+    TF_RETURN_IF_ERROR(session->Run({}, { output_name }, {}, out_tensors));
+    return Status::OK();
+}
 
-            // Reads a model graph definition from disk, and creates a session object you
-            // can use to run it.
-            Status LoadGraph(const string& graph_file_name,
-                std::unique_ptr<tensorflow::Session>* session, tensorflow::GraphDef& graph_def) {
-            //  tensorflow::GraphDef graph_def;
-                Status load_graph_status =
-                    ReadBinaryProto(tensorflow::Env::Default(), graph_file_name, &graph_def);
-                if (!load_graph_status.ok()) {
-                    return tensorflow::errors::NotFound("Failed to load compute graph at '",
-                            graph_file_name, "'");
-                }
+// Reads a model graph definition from disk, and creates a session object you
+// can use to run it.
+Status LoadGraph(const string& graph_file_name,
+    std::unique_ptr<tensorflow::Session>* session, tensorflow::GraphDef& graph_def) {
+    //  tensorflow::GraphDef graph_def;
+    Status load_graph_status =
+        ReadBinaryProto(tensorflow::Env::Default(), graph_file_name, &graph_def);
+    if (!load_graph_status.ok()) {
+        return tensorflow::errors::NotFound("Failed to load compute graph at '",
+            graph_file_name, "'");
+    }
 
-                WriteTextProto(tensorflow::Env::Default(), "/tmp/test_inception_v4.pbtxt", graph_def);
+    WriteTextProto(tensorflow::Env::Default(), "/tmp/test_inception_v4.pbtxt", graph_def);
 
-                tensorflow::SessionOptions options_;
-                options_.config.set_allow_soft_placement(true);
+    tensorflow::SessionOptions options_;
+    options_.config.set_allow_soft_placement(true);
 
-                session->reset(tensorflow::NewSession(options_));
-                Status session_create_status = (*session)->Create(graph_def);
-                if (!session_create_status.ok()) {
-                    return session_create_status;
-                }
-                return Status::OK();
-            }
+    session->reset(tensorflow::NewSession(options_));
+    Status session_create_status = (*session)->Create(graph_def);
+    if (!session_create_status.ok()) {
+        return session_create_status;
+    }
+    return Status::OK();
+}
 
-Status GetTopLabels1(const std::vector<Tensor>& outputs, int how_many_labels,
-        Tensor* out_boxes, Tensor* out_indices, Tensor* out_scores) {
+Status GetTopLabels(const std::vector<Tensor>& outputs, int how_many_labels,
+    Tensor* out_boxes, Tensor* out_indices, Tensor* out_scores) {
     const Tensor& unsorted_scores_tensor = outputs[2];
     auto unsorted_scores_flat = unsorted_scores_tensor.flat<float>();
     std::vector<std::pair<int, float>> scores;
     for (int i = 0; i < unsorted_scores_flat.size(); ++i) {
-        scores.push_back(std::pair<int, float>({i, unsorted_scores_flat(i)}));
+        scores.push_back(std::pair<int, float>({ i, unsorted_scores_flat(i) }));
     }
     std::sort(scores.begin(), scores.end(),
-            [](const std::pair<int, float> &left,
-                const std::pair<int, float> &right) {
-            return left.second > right.second;
-            });
+        [](const std::pair<int, float> &left,
+            const std::pair<int, float> &right) {
+        return left.second > right.second;
+    });
     scores.resize(how_many_labels);
-    Tensor sorted_indices(tensorflow::DT_INT32, {scores.size()});
-    Tensor sorted_scores(tensorflow::DT_FLOAT, {scores.size()});
+    Tensor sorted_indices(tensorflow::DT_INT32, { (long long)scores.size() });
+    Tensor sorted_scores(tensorflow::DT_FLOAT, { (long long)scores.size() });
     for (int i = 0; i < scores.size(); ++i) {
         sorted_indices.flat<int>()(i) = scores[i].first;
         sorted_scores.flat<float>()(i) = scores[i].second;
@@ -232,8 +228,8 @@ Status GetTopLabels1(const std::vector<Tensor>& outputs, int how_many_labels,
 
 // Analyzes the output of the Inception graph to retrieve the highest scores and
 // their positions in the tensor, which correspond to categories.
-Status GetTopLabels(const std::vector<Tensor>& outputs, int how_many_labels,
-        Tensor* boxes, Tensor* indices, Tensor* scores) {
+Status GetTopLabels_topk(const std::vector<Tensor>& outputs, int how_many_labels,
+    Tensor* boxes, Tensor* indices, Tensor* scores) {
     auto root = tensorflow::Scope::NewRootScope();
     using namespace ::tensorflow::ops;  // NOLINT(build/namespaces)
 
@@ -245,13 +241,13 @@ Status GetTopLabels(const std::vector<Tensor>& outputs, int how_many_labels,
     TF_RETURN_IF_ERROR(root.ToGraphDef(&graph));
 
     std::unique_ptr<tensorflow::Session> session(
-            tensorflow::NewSession(tensorflow::SessionOptions()));
+        tensorflow::NewSession(tensorflow::SessionOptions()));
     TF_RETURN_IF_ERROR(session->Create(graph));
     // The TopK node returns two outputs, the scores and their original indices,
     // so we have to append :0 and :1 to specify them both.
     std::vector<Tensor> out_tensors;
-    TF_RETURN_IF_ERROR(session->Run({}, {output_name + ":0", output_name + ":1"},
-                {}, &out_tensors));
+    TF_RETURN_IF_ERROR(session->Run({}, { output_name + ":0", output_name + ":1" },
+    {}, &out_tensors));
     // *boxes= out_tensors[0];
     *scores = out_tensors[0];
     *indices = out_tensors[1];
@@ -259,6 +255,10 @@ Status GetTopLabels(const std::vector<Tensor>& outputs, int how_many_labels,
 }
 
 /*
+
+#include <jpeglib.h>
+#include <setjmp.h>
+
 // Error handling for JPEG decoding.
 void CatchError(j_common_ptr cinfo) {
 (*cinfo->err->output_message)(cinfo);
@@ -305,14 +305,14 @@ jpeg_start_decompress(&cinfo);
  buffer = (*cinfo.mem->alloc_sarray)
  ((j_common_ptr) &cinfo, JPOOL_IMAGE, row_stride, 1);
  while (cinfo.output_scanline < cinfo.output_height) {
- tensorflow::uint8* row_address = &((*data)[cinfo.output_scanline * row_stride]); 
+ tensorflow::uint8* row_address = &((*data)[cinfo.output_scanline * row_stride]);
  jpeg_read_scanlines(&cinfo, buffer, 1);
  memcpy(row_address, buffer[0], row_stride);
  }
 
  jpeg_finish_decompress(&cinfo);
  jpeg_destroy_decompress(&cinfo);
- fclose(infile);  
+ fclose(infile);
  return Status::OK();
  }
 
@@ -353,7 +353,7 @@ for (int y = 0; y < wanted_height; ++y) {
     const int top_y_index = static_cast<int>(floorf(in_y));
     const int bottom_y_index =
         std::min(static_cast<int>(ceilf(in_y)), (image_height - 1));
-    const float y_lerp = in_y - top_y_index; 
+    const float y_lerp = in_y - top_y_index;
     tensorflow::uint8* in_top_row = in + (top_y_index * image_rowlen);
     tensorflow::uint8* in_bottom_row = in + (bottom_y_index * image_rowlen);
     float *out_row = out + (y * wanted_width * wanted_channels);
@@ -372,7 +372,7 @@ for (int y = 0; y < wanted_height; ++y) {
             in_bottom_row + (right_x_index * wanted_channels);
         const float x_lerp = in_x - left_x_index;
         float *out_pixel = out_row + (x * wanted_channels);
-        for (int c = 0; c < wanted_channels; ++c) {	
+        for (int c = 0; c < wanted_channels; ++c) {
 
             const float top_left((in_top_left_pixel[c] ) / input_std);
             const float top_right((in_top_right_pixel[c] ) / input_std);
@@ -401,113 +401,6 @@ return Status::OK();
 }
 
 */
-
-// Given the output of a model run, and the name of a file containing the labels
-// this prints out the top five highest-scoring values.
-/*
-   Status PrintTopLabels(const std::vector<Tensor>& outputs,
-   const string& labels_file_name) {
-   std::vector<string> labels;
-   size_t label_count;
-   Status read_labels_status =
-   ReadLabelsFile(labels_file_name, &labels, &label_count);
-   if (!read_labels_status.ok()) {
-   LOG(ERROR) << read_labels_status;
-   return read_labels_status;
-   }
-   const int how_many_labels = std::min(5, static_cast<int>(label_count));
-   Tensor indices;
-   Tensor scores;
-   TF_RETURN_IF_ERROR(GetTopLabels(outputs, how_many_labels, &indices, &scores));
-   tensorflow::TTypes<float>::Flat scores_flat = scores.flat<float>();
-   tensorflow::TTypes<int32>::Flat indices_flat = indices.flat<int32>();
-   for (int pos = 0; pos < how_many_labels; ++pos) {
-   const int label_index = indices_flat(pos);
-   const float score = scores_flat(pos);
-   LOG(INFO) << labels[label_index] << " (" << label_index << "): " << score;
-   }
-   return Status::OK();
-   }
-   */
-
-// This is a testing function that returns whether the top label index is the
-// one that's expected.
-/*
-   Status CheckTopLabel(const std::vector<Tensor>& outputs, int expected,
-   bool* is_expected) {
- *is_expected = false;
- Tensor indices;
- Tensor scores;
- const int how_many_labels = 1;
- TF_RETURN_IF_ERROR(GetTopLabels(outputs, how_many_labels, &indices, &scores));
- tensorflow::TTypes<int32>::Flat indices_flat = indices.flat<int32>();
- if (indices_flat(0) != expected) {
- LOG(ERROR) << "Expected label #" << expected << " but got #"
- << indices_flat(0);
- *is_expected = false;
- } else {
- *is_expected = true;
- }
- return Status::OK();
- }
-
-*/
-
-/*
-   Status TfSave(Session* session, const string& path) {
-
-   TensorProto path_proto;
-
-   path_proto.set_dtype(DataType::DT_STRING);
-
-   TensorShape({1, 1}).AsProto(path_proto.mutable_tensor_shape());
-
-   path_proto.add_string_val(path);
-
-   Tensor path_tensor;
-
-   if (!path_tensor.FromProto(path_proto)) {
-
-   return errors::Internal("Tensor::FromProto failed.");
-
-   }
-
-   return session->Run(
-
-   {{"save/Const", path_tensor}},
-
-   {}, {"save/control_dependency"}, nullptr);
-
-   }
-
-
-
-   Status TfRestore(Session* session, const string& path) {
-
-   TensorProto path_proto;
-
-   path_proto.set_dtype(DataType::DT_STRING);
-
-   TensorShape({1, 1}).AsProto(path_proto.mutable_tensor_shape());
-
-   path_proto.add_string_val(path);
-
-   Tensor path_tensor;
-
-   if (!path_tensor.FromProto(path_proto)) {
-
-   return errors::Internal("Tensor::FromProto failed.");
-
-   }
-
-   return session->Run(
-
-   {{"save/Const", path_tensor}},
-
-   {}, {"save/restore_all"}, nullptr);
-
-   }
-   */
 
 int main(int argc, char* argv[]) {
     // These are the command-line flags the program can understand.
@@ -570,19 +463,8 @@ int main(int argc, char* argv[]) {
         LOG(ERROR) << load_graph_status;
         return -1;
     }
-    /*
-       Status restore_ckpt = TfRestore(session.get(), ckpt);
-
-       if (!restore_ckpt.ok()) {
-       std::cout << "''''''''''''''''''''''''''''''''''''''''''''''" << std::endl;    
-
-       LOG(ERROR) << restore_ckpt;
-       return -1;
-       }
-
-*/
-    // Get the image from disk as a float array of numbers, resized and normalized
-    // to the specifications the main graph expects.
+// Get the image from disk as a float array of numbers, resized and normalized
+// to the specifications the main graph expects.
     std::vector<Tensor> resized_tensors;
     string image_path = tensorflow::io::JoinPath(root_dir, image);
     /*
@@ -597,13 +479,13 @@ int main(int argc, char* argv[]) {
 
     cv::Mat mat = cv::imread(image_path, CV_LOAD_IMAGE_COLOR);
     std::vector<unsigned char> odata;
-    //cv::Mat img;
+    cv::Mat img;
     cvprocess::resizeImage(mat, 103.939, 116.779, 123.68, input_width, input_height, img);
     cv::imwrite("./img.png", img);
 
     //cvprocess::resizeImage(mat, 123.68, 116.779, 103.939, input_width, input_height, img);
 
-    Tensor inputImg(tensorflow::DT_FLOAT, {1,input_height,input_width,3});
+    Tensor inputImg(tensorflow::DT_FLOAT, { 1,input_height,input_width,3 });
     auto inputImageMapped = inputImg.tensor<float, 4>();
     //Copy all the data over
     for (int y = 0; y < input_height; ++y) {
@@ -616,13 +498,12 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    resized_tensors.push_back(inputImg); 
+    resized_tensors.push_back(inputImg);
 
     const Tensor& resized_tensor = resized_tensors[0];
 
-    std::cout << "==========================================" << std::endl;
-    std::cout << resized_tensor.dims() << std::endl;
-    //std::cout << resized_tensor.dim_size() << std::endl;
+    //std::cout << "==========================================" << std::endl;
+    //std::cout << resized_tensor.dims() << std::endl;
 
     // Actually run the image through the model.
     std::vector<Tensor> outputs;
@@ -633,7 +514,6 @@ int main(int argc, char* argv[]) {
     image_input_shape.AddDim(384);
     image_input_shape.AddDim(624);
     image_input_shape.AddDim(3);
-
 
     tensorflow::TensorShape box_mask_shape;
     box_mask_shape.AddDim(1);
@@ -659,117 +539,44 @@ int main(int argc, char* argv[]) {
     labels_shape.AddDim(3);
     Tensor labels_tensor(tensorflow::DataType::DT_FLOAT, labels_shape);
 
-    //tensorflow::ops::FIFOQueue q(5, {tensorflow::DataType::DT_FLOAT,tensorflow::DataType::DT_FLOAT,tensorflow::DataType::DT_FLOAT,tensorflow::DataType::DT_FLOAT,tensorflow::DataType::DT_FLOAT},
-    // {image_input_shape, box_mask_shape, box_delta_input_shape, box_input_shape, labels_shape});// , "batch/fifo_queue");
-    /*
-       int node_idx;
-       std::string name_node =  "batch/fifo_queue";
-       for (int i = 0; i < graph_def.node_size(); ++i) {
-       const auto& node = graph_def.node(i);
-       if (node.name() == "batch/fifo_queue") {
-       node_idx = i;
-       break;
-       }
-       }
-
-       const auto& node = graph_def.node(node_idx);
-       if (node.op() != "FIFOQueueV2") {
-       std::cout << "++++++++++++++++++++++++++++" <<  std::endl;
-       }
-       std::cout << "--------------------------" << std::endl;
-       std::cout << node.name() <<  std::endl;
-       */
-
-    /*
-       tensorflow::OpDef def1 = node.op_def();
-       for (int i = 0; i < def->attr_size(); i++) {
-       tensorflow::AttrValue* a = def->mutable_attr(i)->mutable_allowed_values();
-       std::cout << a->mutable_list()->get_b() << std::endl;
-       }
-       */
-
-    //node.AddAttr("container", resized_tensor);
-    /*
-       tensorflow::Scope root = tensorflow::Scope::NewRootScope();
-       auto q1 = ops::FIFOQueue(root.WithOpName("Queue1"), {DataType::DT_FLOAT});
-    //auto q1 = ops::FIFOQueue(root.WithOpName("Queue1"), {DataType::DT_FLOAT,DataType::DT_FLOAT,DataType::DT_FLOAT,DataType::DT_FLOAT,DataType::DT_FLOAT},
-    //{image_input_shape, box_mask_shape, box_delta_input_shape, box_input_shape, labels_shape});
-
-    auto enqueue1 = tensorflow::ops::QueueEnqueue(root.WithOpName("Enqueue1"), q1, {resized_tensor});
-    tensorflow::GraphDef graph1;
-    TF_CHECK_OK(root.ToGraphDef(&graph1));
-    tensorflow::SessionOptions options1;
-    std::unique_ptr<tensorflow::Session> session1(tensorflow::NewSession(options1));
-    session1->Create(graph1);
-    std::vector<Tensor> outputs1;
-    session1->Run({},{},{},&outputs1);
-    */
-
     std::cout << "-------------step 1 -------------" << std::endl;
-    Status run_status = session->Run({{"image_input", resized_tensor}, {"box_mask", box_mask_tensor}, {"box_delta_input", box_delta_input_tensor}, {"box_input", box_input_tensor}, {"labels", labels_tensor}},
-            {},{"fifo_queue_EnqueueMany"}, nullptr);
+    Status run_status = session->Run({ {"image_input", resized_tensor}, {"box_mask", box_mask_tensor}, {"box_delta_input", box_delta_input_tensor}, {"box_input", box_input_tensor}, {"labels", labels_tensor} },
+        {}, { "fifo_queue_EnqueueMany" }, nullptr);
 
     // Status run_status = session->Run({{input_layer, resized_tensor}},{},{"fifo_queue_EnqueueMany"}, nullptr);
     if (!run_status.ok()) {
         LOG(ERROR) << "Running model failed: " << run_status;
         return -1;
-    }else{
+    }
+    else {
         LOG(ERROR) << "Running model success: " << run_status;
-
     }
 
     std::cout << "-------------step 2 -------------" << std::endl;
     run_status = session->Run({},
-            {},{"batch/fifo_queue_enqueue"}, nullptr);
+    {}, { "batch/fifo_queue_enqueue" }, nullptr);
 
     // Status run_status = session->Run({{input_layer, resized_tensor}},{},{"fifo_queue_EnqueueMany"}, nullptr);
     if (!run_status.ok()) {
         LOG(ERROR) << "Running model failed: " << run_status;
         return -1;
-    }else{
+    }
+    else {
         LOG(ERROR) << "Running model success: " << run_status;
-
     }
 
-    //Status run_status = session.Run({{input_layer, resized_tensor}},
-    //Status run_status = session->Run({{"image_input", resized_tensor}, {"box_mask", box_mask_tensor}, {"box_delta_input", box_delta_input_tensor}, {"box_input", box_input_tensor}, {"labels", labels_tensor}},
-    // Status run_status = session->Run({{"image_input", resized_tensor}},
-    //Status run_status = session->Run({{"batch/fifo_queue", q1}},
     std::cout << "------------step two--------------" << std::endl;
     run_status = session->Run({},
-            olabels, {}, &outputs);
-    //{output_layer}, {}, &outputs);
+        olabels, {}, &outputs);
 
     if (!run_status.ok()) {
         LOG(ERROR) << "Running model failed: " << run_status;
         return -1;
-    }else{
+    }
+    else {
         LOG(ERROR) << "Running model success: " << run_status;
 
     }
-
-    // This is for automated testing to make sure we get the expected result with
-    // the default settings. We know that label 653 (military uniform) should be
-    // the top label for the Admiral Hopper image.
-    //if (self_test) {
-    //  bool expected_matches;
-    //  Status check_status = CheckTopLabel(outputs, 653, &expected_matches);
-    //  if (!check_status.ok()) {
-    //    LOG(ERROR) << "Running check failed: " << check_status;
-    //    return -1;
-    //  }
-    //  if (!expected_matches) {
-    //    LOG(ERROR) << "Self-test failed!";
-    //    return -1;
-    //  }
-    //}
-
-    // Do something interesting with the results we've generated.
-    //Status print_status = PrintTopLabels(outputs, labels);
-    //if (!print_status.ok()) {
-    //  LOG(ERROR) << "Running print failed: " << print_status;
-    //  return -1;
-    //}
 
     Tensor boxes = outputs[0];
     Tensor oindices = outputs[1];
@@ -777,107 +584,81 @@ int main(int argc, char* argv[]) {
 
     Tensor oboxes;
     Tensor ooindices;
-    Tensor oscores ;
+    Tensor oscores;
 
-    std::cout << boxes.dim_size(0) << std::endl;
-    std::cout << oindices.dim_size(0) << std::endl;
-    std::cout << scores.dim_size(0) << std::endl;
+    //std::cout << boxes.dim_size(0) << std::endl;
+    //std::cout << oindices.dim_size(0) << std::endl;
+    //std::cout << scores.dim_size(0) << std::endl;
 
-    std::cout << boxes.DebugString() << std::endl;
-    std::cout << oindices.DebugString() << std::endl;
-    std::cout << scores.DebugString() << std::endl;
+    //std::cout << boxes.DebugString() << std::endl;
+    //std::cout << oindices.DebugString() << std::endl;
+    //std::cout << scores.DebugString() << std::endl;
 
-    std::cout << boxes.SummarizeValue(100) << std::endl;
-    std::cout << oindices.SummarizeValue(100) << std::endl;
-    std::cout << scores.SummarizeValue(100) << std::endl;
+    //std::cout << boxes.SummarizeValue(100) << std::endl;
+    //std::cout << oindices.SummarizeValue(100) << std::endl;
+    //std::cout << scores.SummarizeValue(100) << std::endl;
 
-    GetTopLabels(outputs, 3, &oboxes, &ooindices, &oscores);
-    tensorflow::TTypes<float>::Flat oscores_flat = oscores.flat<float>();
-    tensorflow::TTypes<int>::Flat ooindices_flat = ooindices.flat<int>();
-    for (int pos = 0; pos < 3; ++pos) {
-        int label_index = ooindices_flat(pos);
-        const float oscore = oscores_flat(pos);
+    //GetTopLabels(outputs, 3, &oboxes, &ooindices, &oscores);
+    //tensorflow::TTypes<float>::Flat oscores_flat = oscores.flat<float>();
+    //tensorflow::TTypes<int>::Flat ooindices_flat = ooindices.flat<int>();
+    //for (int pos = 0; pos < 3; ++pos) {
+    //    int label_index = ooindices_flat(pos);
+    //    const float oscore = oscores_flat(pos);
 
-        typename TTypes<float, 3>::Tensor obox= boxes.tensor<float, 3>();
-        int cx= obox(0, label_index, 0);
-        int cy = obox(0, label_index, 1);
-        int w = obox(0, label_index, 2);
-        int h = obox(0, label_index, 3);
-        int x1 =cx - w/2;
-        int y1 =cy-h/2;
-        int x2 = cx+w/2;
-        int y2 = cy+h/2;
+    //    typename TTypes<float, 3>::Tensor obox = boxes.tensor<float, 3>();
+    //    int cx = obox(0, label_index, 0);
+    //    int cy = obox(0, label_index, 1);
+    //    int w = obox(0, label_index, 2);
+    //    int h = obox(0, label_index, 3);
+    //    int x1 = cx - w / 2;
+    //    int y1 = cy - h / 2;
+    //    int x2 = cx + w / 2;
+    //    int y2 = cy + h / 2;
 
-        cv::rectangle(img, cv::Point(x1,y1),cv::Point(x2,y2), cv::Scalar(0, 0, 255), 2);
-        //cv::rectangle(img, cv::Point(y1,x1),cv::Point(y2,x2), cv::Scalar(255, 0, 0), 2);
-        char text[64];
-        sprintf(text, "%lf", oscore);
-        cv::putText(img, text
-                , cv::Point(x1, y1)
-                //, cv::Point(y1, x1)
-                , CV_FONT_HERSHEY_COMPLEX
-                , 0.8
-                , cv::Scalar(0, 0, 255));
+    //    cv::rectangle(img, cv::Point(x1, y1), cv::Point(x2, y2), cv::Scalar(0, 0, 255), 2);
+    //    char text[64];
+    //    sprintf(text, "%lf", oscore);
+    //    cv::putText(img, text
+    //        , cv::Point(x1, y1)
+    //        , CV_FONT_HERSHEY_COMPLEX
+    //        , 0.8
+    //        , cv::Scalar(0, 0, 255));
 
-        //float box= boxes(pos); 
-
-    }
-    cv::imwrite("./test.png", img);
+    //}
+    //cv::imwrite("./test.png", img);
 
 
-    return 0;
+    //return 0;
 
     GetTopLabels(outputs, 3, &boxes, &oindices, &scores);
-    std::cout << "=================111=========================" << std::endl; 
+    std::cout << "=================111=========================" << std::endl;
     tensorflow::TTypes<float>::Flat scores_flat = scores.flat<float>();
-    std::cout << "=================222=========================" << std::endl; 
+    std::cout << "=================222=========================" << std::endl;
     tensorflow::TTypes<int>::Flat indices_flat = oindices.flat<int>();
     tensorflow::TTypes<long long>::Flat oindices_flat = oindices.flat<long long>();
-    std::cout << "=================333=========================" << std::endl; 
+    std::cout << "=================333=========================" << std::endl;
     for (int pos = 0; pos < 10; ++pos) {
-        std::cout << "=================444=========================" << std::endl; 
+        std::cout << "=================444=========================" << std::endl;
         int label_index = indices_flat(pos);
         const float score = scores_flat(pos);
-        //LOG(INFO) << olabels[label_index] << " (" << label_index << "): " << score;
-        LOG(INFO) << oindices_flat(label_index)  << " (" << label_index << "): " << score;
 
+        LOG(INFO) << oindices_flat(label_index) << " (" << label_index << "): " << score;
 
-        //tensorflow::TTypes<float>::Flat box = boxes.flat<float>();
-
-        //std::cout << box.SummarizeValue(100) << std::endl;
-        // label_index = label_index * 4;
-        //tensorflow::TTypes<int>::Flat obox = box().flat<int>();
-        typename TTypes<float, 3>::Tensor obox= boxes.tensor<float, 3>();
-        /*
-           int x1 = obox(label_index);
-           int y1 = obox(label_index+1);
-           int x2 = obox(label_index+2);
-           int y2 = obox(label_index+3);
-           */
-
+        typename TTypes<float, 3>::Tensor obox = boxes.tensor<float, 3>();
         int x1 = obox(0, label_index, 0);
         int y1 = obox(0, label_index, 1);
         int x2 = obox(0, label_index, 2);
         int y2 = obox(0, label_index, 3);
 
-
-        std::cout << x1 << std::endl;
-        std::cout << y1 << std::endl;
-        std::cout << x2 << std::endl;
-        std::cout << y2 << std::endl;
-        cv::rectangle(img, cv::Point(x1,y1),cv::Point(x2,y2), cv::Scalar(255, 0, 0), 2);
-        //cv::rectangle(img, cv::Point(y1,x1),cv::Point(y2,x2), cv::Scalar(255, 0, 0), 2);
+        cv::rectangle(img, cv::Point(x1, y1), cv::Point(x2, y2), cv::Scalar(255, 0, 0), 2);
         char text[64];
         sprintf(text, "%lf", score);
         cv::putText(img, text
-                , cv::Point(x1, y1)
-                //, cv::Point(y1, x1)
-                , CV_FONT_HERSHEY_COMPLEX
-                , 0.8
-                , cv::Scalar(0, 0, 255));
-
-        //float box= boxes(pos); 
-
+            , cv::Point(x1, y1)
+            //, cv::Point(y1, x1)
+            , CV_FONT_HERSHEY_COMPLEX
+            , 0.8
+            , cv::Scalar(0, 0, 255));
     }
     cv::imwrite("./test.png", img);
 
