@@ -1,0 +1,158 @@
+官方安装文档参考：https://tensorflow.github.io/serving/setup
+
+有问题参考
+https://www.tensorflow.org/install/install_linux
+
+安装依赖环境：
+
+1. 安装bazel
+
+cd ~/Downloads
+chmod +x bazel-0.4.2-installer-linux-x86_64.sh
+./bazel-0.4.2-installer-linux-x86_64.sh --user
+2. 设置环境变量 ~/.bashrc
+export PATH="$PATH:$HOME/bin"
+
+3.安装依赖包
+
+sudo apt-get update && sudo apt-get install -y \
+        build-essential \
+        curl \
+        libcurl3-dev \
+        git \
+        libfreetype6-dev \
+        libpng12-dev \
+        libzmq3-dev \
+        pkg-config \
+        python-dev \
+        python-numpy \
+        python-pip \
+        software-properties-common \
+        swig \
+        zip \
+        zlib1g-dev
+4. 获取源码
+
+git clone --recurse-submodules https://github.com/tensorflow/serving
+cd serving
+5. 执行配置
+
+进入serving/tensorflow运行配置文件：
+
+cd tensorflow
+./configure
+cd ..
+7. 编译安装
+
+bazel --output_base=./output/output/ --output_user_root=./output/bazel/ build -c opt --config=cuda //tensorflow_serving/...
+
+注意：编译GPU版本需要加上 --config=cuda参数才行，否则不会生效
+
+8. 测试编译是否成功
+
+bazel test tensorflow_serving/...
+
+
+
+ 如果输出目录已经存在，删除目录：
+
+ 
+
+ rm -rf /tmp/mnist_model
+ bazel-bin/tensorflow_serving/example/mnist_saved_model /tmp/mnist_model
+ 
+
+编译安装时可能遇到的问题：
+
+1.编译GPU支持报错：
+
+bazel build -c opt --config=cuda --spawn_strategy=standalone tensorflow_serving/...
+received this error:
+ERROR: no such target '@org_tensorflow//third_party/gpus/crosstool:crosstool': target 'crosstool' not declared in package 'third_party/gpus/crosstool' defined by /home/gpuadmin/.cache/bazel/_bazel_gpuadmin/2f87378698dce1c5bd8cb597c1e87ca0/external/org_tensorflow/third_party/gpus/crosstool/BUILD.
+INFO: Elapsed time: 0.175s
+解决方法：修改 tools/bazel.rc文件中第一行的@org_tensorflow//third_party/gpus/crosstool 为 @local_config_cuda//crosstool:toolchain即可
+
+修改完成后执行bazel clean --expunge && export TF_NEED_CUDA=1，然后重新编译。
+
+该问题的讨论详见：https://github.com/tensorflow/serving/issues/186
+
+2.修改完上述问题继续报错
+'@org_tensorflow//tensorflow/contrib/nccl:python/ops/_nccl_ops.so' failed: crosstool_wrapper_driver_is_not_gcc failed: error executing command
+external/local_config_cuda/crosstool/clang/bin/crosstool_wrapper_driver_is_not_gcc -U_FORTIFY_SOURCE '-D_FORTIFY_SOURCE=1' -fstack-protector -fPIE -Wall -Wunused-but-set-parameter ... (remaining 77 argument(s) skipped): com.google.devtools.build.lib.shell.BadExitStatusException: Process exited with status 1.
+In file included from external/org_tensorflow/tensorflow/contrib/nccl/kernels/nccl_manager.cc:15:0:
+external/org_tensorflow/tensorflow/contrib/nccl/kernels/nccl_manager.h:23:44: fatal error: external/nccl_archive/src/nccl.h: No such file or directory
+compilation terminated.
+解决方法：修改serving/tensorflow/tensorflow/contrib/BUILD文件，将其中第49行注掉即可。
+修改完成后执行bazel clean --expunge && export TF_NEED_CUDA=1，然后重新编译。
+该问题的讨论详见：https://github.com/tensorflow/serving/issues/336
+
+或者：
+git clone https://github.com/NVIDIA/nccl.git
+cd nccl/
+make CUDA_HOME=/usr/local/cuda
+
+sudo make install
+sudo mkdir -p /usr/local/include/external/nccl_archive/src
+sudo ln -s /usr/local/include/nccl.h /usr/local/include/external/nccl_archive/src/nccl.h
+
+
+3.如果上述问题解决，成功编译，那就ok了，恭喜build成功！
+
+如果运行例子时继续报错：
+
+ImportError: cannot import name nccl with a minst example.
+
+解决方法：釜底抽薪，直接进入/serving/tensorflow/tensorflow/contrib目录，把__init__.py文件中import nccl的那行注释掉即可。（暂时的解决方案）
+
+------------------------------------------------------------------------------分割线-----------------------------------------------------------------------------
+
+4.在centos系统编译安装时遇到“stropts.h: No such file or directory”的错误，可以把报错文件中的#include <stropts.h>注释，添加#include <sys/ioctl.h>即可
+
+该问题讨论详见：http://forums.fedoraforum.org/archive/index.php/t-194667.html和https://github.com/timschmidt/repsnapper/issues/79
+
+
+
+way to generate the .so file for model_server
+1. append the following into models_server/BUILD
+
+# test for new so file 20170703
+cc_binary(
+     name = "test_model_server.so",
+     srcs = [
+         "tf_model_server.cc",
+         "tf_model_server.h",
+     ],
+    #hdrs = ["tf_model_server.h"],
+     visibility = [
+          "//visibility:public",
+      ],
+    # linkstatic = 1,     
+     linkshared=1,
+
+     deps = [
+         ":model_platform_types",
+         ":platform_config_util",
+         ":server_core",
+         "@protobuf//:cc_wkt_protos",
+         "@org_tensorflow//tensorflow/core:lib",
+         "@org_tensorflow//tensorflow/core/platform/cloud:gcs_file_system",
+         "@org_tensorflow//tensorflow/core/platform/hadoop:hadoop_file_system",
+         "//tensorflow_serving/apis:prediction_service_proto",
+         "//tensorflow_serving/config:model_server_config_proto",
+         "//tensorflow_serving/core:availability_preserving_policy",
+         "@org_tensorflow//tensorflow/contrib:contrib_kernels",
+         "@org_tensorflow//tensorflow/contrib:contrib_ops_op_lib",
+         "@org_tensorflow//tensorflow/core:tensorflow",
+         "//tensorflow_serving/servables/tensorflow:classification_service",
+         "//tensorflow_serving/servables/tensorflow:get_model_metadata_impl",
+         "//tensorflow_serving/servables/tensorflow:multi_inference",
+         "//tensorflow_serving/servables/tensorflow:regression_service",
+         "//tensorflow_serving/servables/tensorflow:saved_model_bundle_source_adapter",
+         "//tensorflow_serving/servables/tensorflow:session_bundle_source_adapter",
+         "//tensorflow_serving/servables/tensorflow:predict_impl",
+     ],
+)
+
+2. build with script:
+bazel --output_base=./output/output/ --output_user_root=./output/bazel/ build -c opt --config=cuda --verbose_failures //tensorflow_serving/model_servers:test_model_server.so
+

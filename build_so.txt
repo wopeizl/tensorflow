@@ -1,0 +1,52 @@
+linux:
+https://github.com/cjweeks/tensorflow-cmake
+1. append into tensorflow/BUILD
+# Added build rule
+cc_binary(
+    name = "libtensorflow_all.so",
+    linkshared = 1,
+    linkopts = ["-Wl,--version-script=tensorflow/tf_version_script.lds"], # if use Mac remove this line
+    deps = [
+        "//tensorflow/cc:cc_ops",
+        "//tensorflow/core:framework_internal",
+        "//tensorflow/core:tensorflow",
+    ],
+)
+
+2. build by 
+./configure      # Note that this requires user input
+bazel build tensorflow:libtensorflow_all.so
+
+
+windows:
+1. create libtensorflow.cmake with content:
+
+add_library(libtensorflow STATIC
+    ${tf_label_image_example_srcs}
+    $<TARGET_OBJECTS:tf_core_lib>
+    $<TARGET_OBJECTS:tf_core_cpu>
+    $<TARGET_OBJECTS:tf_core_framework>
+    $<TARGET_OBJECTS:tf_core_kernels>
+    $<TARGET_OBJECTS:tf_cc_framework>
+    $<TARGET_OBJECTS:tf_cc_ops>
+    $<TARGET_OBJECTS:tf_core_ops>
+    $<TARGET_OBJECTS:tf_core_direct_session>
+    $<$<BOOL:${tensorflow_ENABLE_GPU}>:$<TARGET_OBJECTS:tf_stream_executor>>
+)
+
+target_link_libraries(libtensorflow PUBLIC
+    tf_protos_cc
+    ${tf_core_gpu_kernels_lib}
+    ${tensorflow_EXTERNAL_LIBRARIES}
+) 
+
+2. add into tensorflow\contrib\cmake\CMakeLists.txt
+  include(libtensorflow.cmake)
+
+3. https://github.com/tensorflow/tensorflow/tree/master/tensorflow/contrib/cmake
+
+D:\...\build> cmake .. -A x64 -DCMAKE_BUILD_TYPE=Release ^
+More? -DSWIG_EXECUTABLE=C:/tools/swigwin-3.0.10/swig.exe ^
+More? -DPYTHON_EXECUTABLE=C:/Users/%USERNAME%/AppData/Local/Continuum/Anaconda3/python.exe ^
+More? -DPYTHON_LIBRARIES=C:/Users/%USERNAME%/AppData/Local/Continuum/Anaconda3/libs/python35.lib
+
