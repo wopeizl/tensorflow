@@ -630,37 +630,47 @@ int main(int argc, char* argv[]) {
 
     //return 0;
 
-    GetTopLabels(outputs, 3, &boxes, &oindices, &scores);
-    std::cout << "=================111=========================" << std::endl;
+    float scale_factor_w = (float)img.cols / mat.cols;
+    float scale_factor_h = (float)img.rows / mat.rows;
+
+    GetTopLabels(outputs, 3, &boxes, &ooindices, &scores);
+    //std::cout << "=================111=========================" << std::endl;
     tensorflow::TTypes<float>::Flat scores_flat = scores.flat<float>();
-    std::cout << "=================222=========================" << std::endl;
-    tensorflow::TTypes<int>::Flat indices_flat = oindices.flat<int>();
-    tensorflow::TTypes<long long>::Flat oindices_flat = oindices.flat<long long>();
-    std::cout << "=================333=========================" << std::endl;
-    for (int pos = 0; pos < 10; ++pos) {
-        std::cout << "=================444=========================" << std::endl;
-        int label_index = indices_flat(pos);
+    //std::cout << "=================222=========================" << std::endl;
+    tensorflow::TTypes<long long>::Flat indices_flat = oindices.flat<long long>();
+    tensorflow::TTypes<int>::Flat oindices_flat = ooindices.flat<int>();
+    //std::cout << "=================333=========================" << std::endl;
+    for (int pos = 0; pos < 3; ++pos) {
+        //std::cout << "=================444=========================" << std::endl;
+        int label_index = oindices_flat(pos);
         const float score = scores_flat(pos);
 
-        LOG(INFO) << oindices_flat(label_index) << " (" << label_index << "): " << score;
+        LOG(INFO) << indices_flat(label_index) << " (" << label_index << "): " << score;
 
         typename TTypes<float, 3>::Tensor obox = boxes.tensor<float, 3>();
-        int x1 = obox(0, label_index, 0);
-        int y1 = obox(0, label_index, 1);
-        int x2 = obox(0, label_index, 2);
-        int y2 = obox(0, label_index, 3);
+            int cx = obox(0, label_index, 0);
+            int cy = obox(0, label_index, 1);
+            int w = obox(0, label_index, 2);
+            int h = obox(0, label_index, 3);
+            int x1 = cx - w / 2;
+            int y1 = cy - h / 2;
+            int x2 = cx + w / 2;
+            int y2 = cy + h / 2;
+            x1 /= scale_factor_w;
+            x2 /= scale_factor_w;
+            y1 /= scale_factor_h;
+            y2 /= scale_factor_h;
 
-        cv::rectangle(img, cv::Point(x1, y1), cv::Point(x2, y2), cv::Scalar(255, 0, 0), 2);
+        cv::rectangle(mat, cv::Point(x1, y1), cv::Point(x2, y2), cv::Scalar(255, 0, 0), 2);
         char text[64];
         sprintf(text, "%lf", score);
-        cv::putText(img, text
+        cv::putText(mat, text
             , cv::Point(x1, y1)
-            //, cv::Point(y1, x1)
             , CV_FONT_HERSHEY_COMPLEX
             , 0.8
             , cv::Scalar(0, 0, 255));
     }
-    cv::imwrite("./test.png", img);
+    cv::imwrite("./test.png", mat);
 
     return 0;
 }
