@@ -409,8 +409,8 @@ struct c_tf_detect_result {
 };
 
 void prepare_tf_detect_result(tensorflow::Tensor& boxes, tensorflow::Tensor& classes, tensorflow::Tensor& scores, 
-    float scale_factor_w, float scale_factor_h, float threshold,
-    std::map<int, std::vector<c_tf_detect_result> > & dst) {
+    float scale_factor_w, float scale_factor_h,
+    float threshold, std::vector<c_tf_detect_result> & dst) {
     tensorflow::TTypes<float>::Flat scores_flat = scores.flat<float>();
     tensorflow::TTypes<long long>::Flat classes_flat = classes.flat<long long>();
     typename TTypes<float, 3>::Tensor obox = boxes.tensor<float, 3>();
@@ -433,60 +433,45 @@ void prepare_tf_detect_result(tensorflow::Tensor& boxes, tensorflow::Tensor& cla
             y1 /= scale_factor_h;
             y2 /= scale_factor_h;
             nr.r = cv::Rect(x1 < x2 ? x1 : x2, y1 < y2 ? y1 : y2, abs(x1 - x2), abs(y1 - y2));
-            
-            auto iter = dst.find(nr.nclass);
-            if (iter == dst.end()) {
-                std::vector<c_tf_detect_result> s;
-                s.push_back(nr);
-                dst.insert(std::make_pair(nr.nclass, s));
-            }
-            else {
-                iter->second.push_back(nr);
-            }
+            dst.push_back(nr);
         }
     }
 }
 
-void nms_plus(std::map<int, std::vector<c_tf_detect_result> >& input, std::map<int, std::vector<c_tf_detect_result> >& output, float thresh) {
-    output.clear();
+void nms_plus(std::vector<c_tf_detect_result>& src, std::vector<c_tf_detect_result>& dst, float thresh) {
+    dst.clear();
 
-    for (auto iter = input.begin(); iter != input.end(); ++iter) {
-        std::vector<c_tf_detect_result>& src = iter->second;
-        std::sort(src.begin(), src.end(), [](c_tf_detect_result c1, c_tf_detect_result c2) { return c1.score < c2.score; });
+    std::sort(src.begin(), src.end(), [](c_tf_detect_result c1, c_tf_detect_result c2) {return c1.score < c2.score; });
 
-        std::vector<c_tf_detect_result> dst;
-        while (src.size() > 0)
+    while (src.size() > 0)
+    {
+        // grab the last rectangle
+        auto lastElem = --std::end(src);
+        const cv::Rect& rect1 = lastElem->r;
+
+        src.erase(lastElem);
+
+        for (auto pos = std::begin(src); pos != std::end(src); )
         {
-            // grab the last rectangle
-            auto lastElem = --std::end(src);
-            const cv::Rect& rect1 = lastElem->r;
+            // grab the current rectangle
+            const cv::Rect& rect2 = pos->r;
 
-            src.erase(lastElem);
+            float intArea = (rect1 & rect2).area();
+            float unionArea = rect1.area() + rect2.area() - intArea;
+            float overlap = intArea / unionArea;
 
-            for (auto pos = std::begin(src); pos != std::end(src); )
+            // if there is sufficient overlap, suppress the current bounding box
+            if (overlap > thresh)
             {
-                // grab the current rectangle
-                const cv::Rect& rect2 = pos->r;
-
-                float intArea = (rect1 & rect2).area();
-                float unionArea = rect1.area() + rect2.area() - intArea;
-                float overlap = intArea / unionArea;
-
-                // if there is sufficient overlap, suppress the current bounding box
-                if (overlap >= thresh)
-                {
-                    pos = src.erase(pos);
-                }
-                else
-                {
-                    ++pos;
-                }
+                pos = src.erase(pos);
             }
-
-            dst.push_back(*lastElem);
+            else
+            {
+                ++pos;
+            }
         }
-
-        output.insert(std::make_pair(iter->first, dst));
+          
+        dst.push_back(*lastElem);
     }
 }
 
@@ -506,7 +491,6 @@ int main(int argc, char* argv[]) {
     int32 input_height = 299;
     int32 input_mean = 0;
     int32 input_std = 255;
-    float thres_hold = 0.6;
     string input_layer = "image_input";
     string output_layer = "InceptionV3/Predictions/Reshape_1";
     bool self_test = false;
@@ -515,7 +499,6 @@ int main(int argc, char* argv[]) {
         Flag("image", &image, "image to be processed"),
         Flag("out_image", &out_image, "output image"),
         Flag("graph", &graph, "graph to be executed"),
-        Flag("thres_hold", &thres_hold, "probability thres_hold"),
         Flag("ckpt", &ckpt, "check point"),
         Flag("labels", &labels, "name of file containing labels"),
         Flag("input_width", &input_width, "resize image to this width in pixels"),
@@ -725,27 +708,24 @@ int main(int argc, char* argv[]) {
     float scale_factor_h = (float)img.rows / mat.rows;
 
     if (1) {
-        std::map<int, std::vector<c_tf_detect_result> >  src;
-        std::map<int, std::vector<c_tf_detect_result> >  dst;
-        prepare_tf_detect_result(boxes, oindices, scores, scale_factor_w, scale_factor_h, thres_hold, src);
+        std::vector<c_tf_detect_result>  src;
+        std::vector<c_tf_detect_result>  dst;
+        prepare_tf_detect_result(boxes, oindices, scores, scale_factor_w, scale_factor_h, 0.05, src);
         nms_plus(src, dst, 0.4);
 
-        for (auto it = dst.begin(); it != dst.end(); ++it) {
-            std::vector<c_tf_detect_result>& cur = it->second;
-            for (auto iter = cur.begin(); iter != cur.end(); ++iter) {
-                int x1 = iter->r.x;
-                int y1 = iter->r.y;
-                int x2 = x1 + iter->r.width;
-                int y2 = y1 + iter->r.height;
-                cv::rectangle(mat, cv::Point(x1, y1), cv::Point(x2, y2), cv::Scalar(255, 0, 0), 2);
-                char text[64];
-                sprintf(text, "%lf", iter->score);
-                cv::putText(mat, text
-                    , cv::Point(x1, y1)
-                    , CV_FONT_HERSHEY_COMPLEX
-                    , 0.8
-                    , cv::Scalar(0, 0, 255));
-            }
+        for (auto iter = dst.begin(); iter != dst.end(); ++iter) {
+            int x1 = iter->r.x;
+            int y1 = iter->r.y;
+            int x2 = x1 + iter->r.width;
+            int y2 = y1 + iter->r.height;
+            cv::rectangle(mat, cv::Point(x1, y1), cv::Point(x2, y2), cv::Scalar(255, 0, 0), 2);
+            char text[64];
+            sprintf(text, "%lf", iter->score);
+            cv::putText(mat, text
+                , cv::Point(x1, y1)
+                , CV_FONT_HERSHEY_COMPLEX
+                , 0.8
+                , cv::Scalar(0, 0, 255));
         }
     }
     else {
