@@ -1,0 +1,12 @@
+1. https://github.com/tensorflow/models/blob/master/slim/
+
+2. get the graph definition:
+bazel-bin/tensorflow_models/slim/export_inference_graph \
+--model_name=inception_v4 --output_file=inception_v4_graph.pb
+
+3. generate the final pb:
+bazel-bin/tensorflow/python/tools/freeze_graph \
+--input_graph=inception_v4_graph.pb --input_checkpoint=inception_v4.ckpt \
+--input_binary=true --output_graph=inception_v4.pb \
+--output_node_names=InceptionV4/Logits/Predictions
+
